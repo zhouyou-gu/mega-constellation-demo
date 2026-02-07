@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Mega-constellation simulation and visualization.
+"""Mega-constellation digital twin and visualization.
 
 This module loads Starlink TLE data, filters invalid satellites, computes Earth’s
 rotation, and visualizes Earth plus satellites in a 3D scene. It is structured to
@@ -7,7 +7,7 @@ separate concerns:
 
 1) Numerical kernels (Numba-accelerated) for geometry and filtering
 2) Visualization setup (Vispy scene construction)
-3) Simulation orchestration (state update, rendering, and profiling)
+3) Digital twin orchestration (state update, rendering, and profiling)
 Author: Zhouyou Gu (SUTD) – zhouyou_gu@sutd.edu.sg
 """
 
@@ -62,8 +62,8 @@ def cprofile_context():
 # Configuration and constants
 # ---------------------------
 @dataclass(frozen=True)
-class SimulationConfig:
-    """Configuration parameters for simulation behavior and visualization."""
+class DigitalTwinConfig:
+    """Configuration parameters for digital twin behavior and visualization."""
 
     for_theta_deg: float = 15.0
     lisl_max_distance_km: float = 3000.0
@@ -74,7 +74,7 @@ class SimulationConfig:
     arrow_length_scale: float = 0.01
 
 
-DEFAULT_CONFIG = SimulationConfig()
+DEFAULT_CONFIG = DigitalTwinConfig()
 
 
 # ---------------------------
@@ -784,7 +784,7 @@ def _create_text_overlays(canvas: scene.SceneCanvas) -> Dict[str, scene.visuals.
     }
 
 
-def setup_visualization(config: SimulationConfig = DEFAULT_CONFIG) -> Dict[str, object]:
+def setup_visualization(config: DigitalTwinConfig = DEFAULT_CONFIG) -> Dict[str, object]:
     """
     Set up the Vispy visualization environment including canvas, view, sphere, and markers.
 
@@ -792,7 +792,7 @@ def setup_visualization(config: SimulationConfig = DEFAULT_CONFIG) -> Dict[str, 
         dict: Dictionary containing references to visualization components.
     """
     canvas = scene.SceneCanvas(
-        title='Mega-Constellation Simulation',
+        title='Mega-Constellation Digital Twin',
         size=(1200, 700),
         position=(0, 0),
         keys='interactive',
@@ -872,10 +872,10 @@ def setup_visualization(config: SimulationConfig = DEFAULT_CONFIG) -> Dict[str, 
 
 
 # ---------------------------
-# Simulation orchestration
+# Digital Twin orchestration
 # ---------------------------
-class Simulation:
-    """Main simulation controller for satellite state and visualization updates."""
+class DigitalTwin:
+    """Main digital twin controller for satellite state and visualization updates."""
 
     # Standardized color palette for LT directions.
     FRONT_COLOR = np.array([0, 0, 0.85, 1])
@@ -883,9 +883,9 @@ class Simulation:
     RIGHT_COLOR = np.array([1, 0, 0, 1])
     LEFT_COLOR = np.array([0.75, 0.75, 0, 1])
 
-    def __init__(self, ts, sat_array, viz: Dict[str, object], config: SimulationConfig = DEFAULT_CONFIG):
+    def __init__(self, ts, sat_array, viz: Dict[str, object], config: DigitalTwinConfig = DEFAULT_CONFIG):
         """
-        Initialize the simulation.
+        Initialize the digital twin.
 
         Parameters:
             ts: Skyfield timescale.
@@ -902,7 +902,7 @@ class Simulation:
         self.viz = viz
         self.config = config
         
-        self.simulation_start_time = self.ts.now()
+        self.digital_twin_start_time = self.ts.now()
         self.real_start_time = time.perf_counter()
         self.update_count = 0
         self.accumulated_update_time = 0
@@ -926,15 +926,15 @@ class Simulation:
 
     def get_simulation_time(self):
         """
-        Compute the current simulation time based on the time scaling factor.
+        Compute the current digital twin time based on the time scaling factor.
 
         Returns:
-            Skyfield Time: The current simulation time.
+            Skyfield Time: The current digital twin time.
         """
         elapsed_real = time.perf_counter() - self.real_start_time
         elapsed_scaled = elapsed_real * self.config.time_scale
         delta_days = elapsed_scaled / 86400  # Convert seconds to days.
-        new_tt_jd = self.simulation_start_time.tt + delta_days
+        new_tt_jd = self.digital_twin_start_time.tt + delta_days
         return self.ts.tt(jd=new_tt_jd)
 
     def compute_rotation(self) -> float:
@@ -1104,7 +1104,7 @@ class Simulation:
         
     def update(self, event):
         """
-        Update function called on each timer tick to update the simulation.
+        Update function called on each timer tick to update the digital twin.
         """
         start_time = time.perf_counter()
         cpu_usage = psutil.cpu_percent()
@@ -1114,7 +1114,7 @@ class Simulation:
         logger.info(f"CPU Usage: {cpu_usage}%, Memory Usage: {mem_usage:.2f} MB")
 
         try:
-            # Update Earth rotation for the current simulation time.
+            # Update Earth rotation for the current digital twin time.
             tic = time.perf_counter()
             self._update_earth_rotation()
             toc = time.perf_counter()
@@ -1192,7 +1192,7 @@ class Simulation:
         return text
 
     def _build_author_text(self) -> str:
-        """Format the window title with simulation stats."""
+        """Format the window title with digital twin stats."""
         author = f"Auth.: Z. Gu, Supr.: J. Park, Aff.: SUTD\n"
         return author
 
@@ -1218,11 +1218,11 @@ def main():
     config = DEFAULT_CONFIG
     viz = setup_visualization(config)
 
-    # Create simulation instance.
-    simulation = Simulation(ts, sat_array, viz, config=config)
+    # Create digital twin instance.
+    digital_twin = DigitalTwin(ts, sat_array, viz, config=config)
 
-    # Set up a timer to update the simulation at roughly 60 FPS.
-    timer1 = app.Timer(interval=1 / 60.0, connect=simulation.update, start=True)
+    # Set up a timer to update the digital twin at roughly 60 FPS.
+    timer1 = app.Timer(interval=1 / 60.0, connect=digital_twin.update, start=True)
     app.run()
 
 if __name__ == '__main__':

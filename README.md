@@ -1,8 +1,8 @@
-# Mega-Constellation Simulator: A 3D Starlink LISL Visualizer.
+# Mega-Constellation Digital Twin: A 3D Starlink LISL Visualizer.
 
-A 3D visualization of Starlink satellites with Earth rotation, built with Skyfield + SGP4 for orbit propagation and Vispy for rendering. The project is also a data‑oriented simulator: the core LISL pipeline is organized as batch numerical kernels over arrays to support large‑scale constellation analysis.
+A 3D digital twin of Starlink satellites with Earth rotation, built with Skyfield + SGP4 for orbit propagation and Vispy for rendering. The project is also a data‑oriented digital twin: the core LISL pipeline is organized as batch numerical kernels over arrays to support large‑scale constellation analysis.
 
-This repository is intended as a research‑grade visualization and prototyping tool for inter‑satellite link (LISL) concepts and mega‑constellation behavior.
+This repository is intended as a research‑grade digital twin and prototyping tool for inter‑satellite link (LISL) concepts and mega‑constellation behavior.
 
 **Author:** Zhouyou Gu, research fellow at Singapore University of Technology and Design (SUTD), supervised by Prof. Jihong Park.
 
@@ -11,7 +11,7 @@ This repository is intended as a research‑grade visualization and prototyping 
 - Propagates satellite positions/velocities in real time
 - Visualizes satellites, Earth texture, and LISL links
 - Computes candidate LISL edges using view constraints and a greedy matching heuristic
-- Data-oriented simulation pipeline with array-first kernels for scalability
+- Data-oriented digital twin pipeline with array-first kernels for scalability
 - Uses Numba for JIT-compiled numerical kernels
 
 ## Quick Glossary
@@ -43,8 +43,8 @@ BibTeX:
 }
 ```
 
-## Data-Oriented Simulator
-The simulator is structured around data-parallel, array-first computations rather than per-satellite object updates. This makes it easier to scale to thousands of satellites while keeping the pipeline inspectable for research.
+## Data-Oriented Digital Twin
+The digital twin is structured around data-parallel, array-first computations rather than per-satellite object updates. This makes it easier to scale to thousands of satellites while keeping the pipeline inspectable for research.
 
 Key design points:
 - Positions/velocities are propagated as dense arrays each frame.
@@ -55,10 +55,10 @@ Key design points:
 Why data-oriented:
 - Traditional constellation simulators often model each satellite/link as an object and step the simulation via events or time steps. This can create rigid data structures and extra overhead when updating large, time-varying constellations.
 - A data-oriented approach keeps the constellation state in contiguous arrays, enabling vectorized updates and compiled kernels to operate directly on the same data without serialization.
-- The visualization pipeline can directly map these arrays into GPU buffers, keeping the rendered state synchronized with the simulation output.
+- The visualization pipeline can directly map these arrays into GPU buffers, keeping the rendered digital twin state synchronized with the real-time constellation output.
 
 ## Repository Layout
-- [simulation.py](simulation.py): Main simulation entry point, numerical kernels, and visualization loop
+- [simulation.py](simulation.py): Main digital twin entry point, numerical kernels, and visualization loop
 - [requirements.txt](requirements.txt): Python dependencies
 - population_density_texture.png: Earth texture image used for the sphere (place next to simulation.py)
 
@@ -100,23 +100,23 @@ You should see:
 - Colored LISL links appearing between satellites
 
 ## Configuration
-The simulation uses a centralized configuration object. Default values live in `SimulationConfig` and `DEFAULT_CONFIG` in [simulation.py](simulation.py).
+The digital twin uses a centralized configuration object. Default values live in `DigitalTwinConfig` and `DEFAULT_CONFIG` in [simulation.py](simulation.py).
 
-To change parameters, edit `DEFAULT_CONFIG` in [simulation.py](simulation.py), or pass a custom `SimulationConfig` when constructing `Simulation` in `main()`.
+To change parameters, edit `DEFAULT_CONFIG` in [simulation.py](simulation.py), or pass a custom `DigitalTwinConfig` when constructing `DigitalTwin` in `main()`.
 
 Key parameters (what they mean):
 - `for_theta_deg`: LISL pointing half‑angle threshold (smaller = stricter)
 - `lisl_max_distance_km`: Maximum distance for LISL candidate edges
-- `time_scale`: Simulation time scaling factor
+- `time_scale`: Digital twin time scaling factor
 - `earth_radius_km`: Earth radius used for normalization
 - `plot_potential_lisl`: Whether to draw all candidate LISLs (may be slower)
 - `texture_path`: Path to Earth texture image
 
 ## Notes
-- The simulation loads TLEs from Celestrak at runtime.
+- The digital twin loads TLEs from Celestrak at runtime.
 - The visualization loop can be heavy on CPU and memory for large TLE sets.
 - The first run may be slower due to Numba JIT compilation of kernels.
-- Adjust parameters in SimulationConfig for performance/visual clarity.
+- Adjust parameters in DigitalTwinConfig for performance/visual clarity.
 
 ## Tested Platform
 - macOS @ MacBook Pro (M4, 2024) with FPS ~15-25 for full Starlink constellation 
