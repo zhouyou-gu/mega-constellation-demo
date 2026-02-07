@@ -1,0 +1,16 @@
+.venv/
+__pycache__/
+*.py[cod]
+*.so
+*.dylib
+.DS_Store
+.ipynb_checkpoints/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.vscode/
+*.log
+DataAnalysisExpert/
+
+
+gp.php*

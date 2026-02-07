@@ -1,0 +1,9 @@
+numpy
+numba
+psutil
+Pillow
+scipy
+skyfield
+sgp4
+vispy
+PyQt6
