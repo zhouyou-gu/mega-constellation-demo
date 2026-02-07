@@ -764,11 +764,23 @@ def _create_text_overlays(canvas: scene.SceneCanvas) -> Dict[str, scene.visuals.
         anchor_y='bottom',
         parent=canvas.central_widget,
     )
+    
+    text_bot_right = scene.visuals.Text(
+        text="Waiting...",
+        color='black',
+        font_size=font_size,
+        bold=False,
+        pos=(w, h),
+        anchor_x='right',
+        anchor_y='top',
+        parent=canvas.central_widget,
+    )
 
     return {
         "text_top": text_top,
         "text_bot": text_bot,
         "text_top_right": text_top_right,
+        "text_bot_right": text_bot_right,
     }
 
 
@@ -895,6 +907,8 @@ class Simulation:
         self.update_count = 0
         self.accumulated_update_time = 0
         self.average_update_time = 1
+        self.cpu_usage_sum = 0.0
+        self.average_cpu_usage = 0.0
 
         # Initialize satellite positions and velocities.
         self.positions = None
@@ -1094,6 +1108,8 @@ class Simulation:
         """
         start_time = time.perf_counter()
         cpu_usage = psutil.cpu_percent()
+        self.cpu_usage_sum += cpu_usage
+        self.average_cpu_usage = self.cpu_usage_sum / (self.update_count + 1)
         mem_usage = psutil.Process().memory_info().rss / 1e6
         logger.info(f"CPU Usage: {cpu_usage}%, Memory Usage: {mem_usage:.2f} MB")
 
@@ -1125,6 +1141,7 @@ class Simulation:
             
             self.viz['text_bot'].text = self._build_status_text(cpu_usage, mem_usage)
             self.viz['text_top_right'].text = self._build_profile_text()
+            self.viz['text_bot_right'].text = self._build_author_text()
         except Exception as e:
             logger.error("Unexpected error during update: %s", e)
 
@@ -1142,7 +1159,7 @@ class Simulation:
         connected_lts: np.ndarray,
     ) -> str:
         """Format link statistics shown in the top-left overlay."""
-        text = ""
+        text = "CONSTELLATION CONFIG:\n"
         text += f"#n_sats: {self.positions.shape[0]}\n"
         text += f"#n_q_es: {edges.shape[0]}\n"
         text += f"#n_p_sp: {filtered_edges.shape[0]}\n"
@@ -1154,7 +1171,7 @@ class Simulation:
 
     def _build_status_text(self, cpu_usage: float, mem_usage: float) -> str:
         """Format runtime performance and time scaling stats."""
-        text = ""
+        text = "STATUS:\n"
         text += f"AVG: {self.average_update_time:.4f} s\n"
         text += f"UPD: {self.update_count}\n"
         text += f"TOT: {time.perf_counter() - self.real_start_time:.2f} s\n"
@@ -1163,15 +1180,21 @@ class Simulation:
         text += f"SWT: {self.accumulated_update_time*self.config.time_scale:.2f} s\n"
         text += f"DAT: {self.get_simulation_time().utc_strftime('%Y-%m-%d %H:%M:%S')}\n"
         text += f"CPU: {cpu_usage}%\n"
+        text += f"CPU_AVG: {self.average_cpu_usage:.2f}%\n"
         text += f"MEM: {mem_usage:.2f} MB\n"
         return text
 
     def _build_profile_text(self) -> str:
         """Format profiling breakdown for the top-right overlay."""
-        text = ""
+        text = "TIME PROFILE:\n"
         for key, value in self.profiled_time.items():
             text += f"{key}: {value:.4f} s\n"
         return text
+
+    def _build_author_text(self) -> str:
+        """Format the window title with simulation stats."""
+        author = f"Auth.: Z. Gu, Supr.: J. Park, Aff.: SUTD\n"
+        return author
 
     def update_dummy(self, event):
         """
