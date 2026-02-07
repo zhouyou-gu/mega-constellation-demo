@@ -1,25 +1,29 @@
-#Author: Zhouyou Gu at SUTD
-#Email: zhouyou_gu@sutd.edu.sg
-
 #!/usr/bin/env python3
-"""
-Simulation of Starlink satellites with Earth rotation and Vispy visualization.
+"""Mega-constellation simulation and visualization.
 
-This script loads Starlink TLE data, filters invalid satellites, computes Earth’s rotation,
-and visualizes both the Earth (with a textured sphere) and satellites in a 3D scene.
+This module loads Starlink TLE data, filters invalid satellites, computes Earth’s
+rotation, and visualizes Earth plus satellites in a 3D scene. It is structured to
+separate concerns:
+
+1) Numerical kernels (Numba-accelerated) for geometry and filtering
+2) Visualization setup (Vispy scene construction)
+3) Simulation orchestration (state update, rendering, and profiling)
+Author: Zhouyou Gu (SUTD) – zhouyou_gu@sutd.edu.sg
 """
 
-import math
-import time
 import cProfile
 import io
 import logging
+import math
 import pstats
+import time
 from contextlib import contextmanager
+from dataclasses import dataclass
 from itertools import combinations
+from typing import Dict, Optional, Tuple
 
-import psutil
 import numpy as np
+import psutil
 from numba import njit, prange
 from PIL import Image
 from scipy.spatial import cKDTree
@@ -27,14 +31,18 @@ from scipy.spatial import cKDTree
 from skyfield.api import load
 from skyfield.sgp4lib import TEME
 from sgp4.api import SatrecArray
-from vispy import app, scene, gloo
+from vispy import app, gloo, scene
 from vispy.geometry import MeshData, create_sphere
 from vispy.visuals.filters import TextureFilter
 from vispy.visuals.transforms import MatrixTransform, STTransform
 
-# Configure logging
+# ---------------------------
+# Logging and profiling tools
+# ---------------------------
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+
 @contextmanager
 def cprofile_context():
     """Context manager to log the most expensive profiler entries."""
@@ -49,7 +57,30 @@ def cprofile_context():
         ps.print_stats(10)  # shows top 10 lines
         logger.debug("++%s", s.getvalue())
 
-def expand_edges_with_original(edges: np.ndarray, repeat_per_node: int = 4) -> tuple:
+
+# ---------------------------
+# Configuration and constants
+# ---------------------------
+@dataclass(frozen=True)
+class SimulationConfig:
+    """Configuration parameters for simulation behavior and visualization."""
+
+    for_theta_deg: float = 15.0
+    lisl_max_distance_km: float = 3000.0
+    time_scale: float = 10.0
+    earth_radius_km: float = 6371.0
+    plot_potential_lisl: bool = False
+    texture_path: str = "population_density_texture.png"
+    arrow_length_scale: float = 0.01
+
+
+DEFAULT_CONFIG = SimulationConfig()
+
+
+# ---------------------------
+# Helper utilities (non-Numba)
+# ---------------------------
+def expand_edges_with_original(edges: np.ndarray, repeat_per_node: int = 4) -> Tuple[np.ndarray, np.ndarray]:
     """
     Expand edges by duplicating each edge in a grid fashion.
 
@@ -66,6 +97,9 @@ def expand_edges_with_original(edges: np.ndarray, repeat_per_node: int = 4) -> t
     repeated_original = np.repeat(edges, repeat_per_node * repeat_per_node, axis=0)
     return repeated_original, expanded_edges
 
+# ---------------------------
+# Numba-accelerated kernels
+# ---------------------------
 @njit(parallel=True,cache=True)
 def update_arrows(velocities, positions):
     """
@@ -104,9 +138,15 @@ def update_arrows(velocities, positions):
         v1 = velocities[i, 1]
         v2 = velocities[i, 2]
         norm_v = math.sqrt(v0*v0 + v1*v1 + v2*v2)
-        front[i, 0] = v0 / norm_v
-        front[i, 1] = v1 / norm_v
-        front[i, 2] = v2 / norm_v
+        if norm_v == 0:
+            # Degenerate velocity; keep direction as zero-vector
+            front[i, 0] = 0.0
+            front[i, 1] = 0.0
+            front[i, 2] = 0.0
+        else:
+            front[i, 0] = v0 / norm_v
+            front[i, 1] = v1 / norm_v
+            front[i, 2] = v2 / norm_v
 
         # "Back" is simply the negative of "front"
         back[i, 0] = -front[i, 0]
@@ -118,9 +158,15 @@ def update_arrows(velocities, positions):
         p1 = positions[i, 1]
         p2 = positions[i, 2]
         norm_p = math.sqrt(p0*p0 + p1*p1 + p2*p2)
-        down[i, 0] = p0 / norm_p
-        down[i, 1] = p1 / norm_p
-        down[i, 2] = p2 / norm_p
+        if norm_p == 0:
+            # Degenerate position; keep direction as zero-vector
+            down[i, 0] = 0.0
+            down[i, 1] = 0.0
+            down[i, 2] = 0.0
+        else:
+            down[i, 0] = p0 / norm_p
+            down[i, 1] = p1 / norm_p
+            down[i, 2] = p2 / norm_p
 
         # Compute the cross product for "right": cross(down, front)
         right[i, 0] = down[i, 1] * front[i, 2] - down[i, 2] * front[i, 1]
@@ -269,10 +315,14 @@ def compute_directions(positions, edges):
         for j in range(d):
             norm += diff[j] * diff[j]
         norm = np.sqrt(norm)
-        
-        # Normalize the difference vector
-        for j in range(d):
-            directions[i, j] = diff[j] / norm
+
+        # Normalize the difference vector (guard against zero length)
+        if norm == 0:
+            for j in range(d):
+                directions[i, j] = 0.0
+        else:
+            for j in range(d):
+                directions[i, j] = diff[j] / norm
 
     return directions
 
@@ -297,7 +347,7 @@ def compute_view_LT_pair_min_cos(filtered_view_from_stack, filtered_view_to_stac
                 else:
                     min_vals[i, j, k] = b_val
                     
-    # Flatten the 3D array to 1D.
+    # Flatten the 3D array to 1D for mask-based selection.
     flat_min_vals = min_vals.reshape(-1)
     N = flat_min_vals.shape[0]
     
@@ -628,7 +678,7 @@ def compute_texcoords(faces: np.ndarray) -> np.ndarray:
     return np.array(texcoords)
 
 
-def load_starlink_data(url: str, reload: bool = True) -> tuple:
+def load_starlink_data(url: str, reload: bool = True) -> Tuple[object, list, SatrecArray]:
     """
     Load Starlink TLE data from the provided URL.
 
@@ -639,12 +689,14 @@ def load_starlink_data(url: str, reload: bool = True) -> tuple:
     Returns:
         tuple: (timescale, valid_satellites, sat_array)
     """
+    # Initialize timescale and load TLEs from remote source.
     ts = load.timescale()
     satellites = load.tle_file(url, reload=reload)
     if not satellites:
         raise Exception("No Starlink satellites were loaded; check the TLE URL.")
     logger.debug("Loaded %d Starlink satellites from %s", len(satellites), url)
 
+    # Filter out satellites with invalid positions to avoid propagator errors.
     valid_satellites = []
     for sat in satellites:
         pos = sat.at(ts.now())
@@ -659,15 +711,82 @@ def load_starlink_data(url: str, reload: bool = True) -> tuple:
     return ts, valid_satellites, sat_array
 
 
-def setup_visualization() -> dict:
+# ---------------------------
+# Visualization utilities
+# ---------------------------
+def _load_earth_texture(texture_path: str) -> np.ndarray:
+    """Load and duplicate the Earth texture for spherical mapping."""
+    try:
+        texture_image = Image.open(texture_path)
+    except Exception as exc:
+        logger.error("Error loading texture image: %s", exc)
+        raise
+
+    texture = np.array(texture_image)
+    # Duplicate texture horizontally to reduce seam artifacts.
+    return np.hstack([texture, texture])
+
+
+def _create_text_overlays(canvas: scene.SceneCanvas) -> Dict[str, scene.visuals.Text]:
+    """Create and position text overlays for status and profiling output."""
+    w, h = canvas.size
+    font_size = 10
+
+    text_top = scene.visuals.Text(
+        text="Waiting...",
+        color='black',
+        font_size=font_size,
+        bold=False,
+        pos=(0, 0),
+        anchor_x='left',
+        anchor_y='bottom',
+        parent=canvas.central_widget,
+    )
+
+    text_bot = scene.visuals.Text(
+        text="Waiting...",
+        color='black',
+        font_size=font_size,
+        bold=False,
+        pos=(0, h),
+        anchor_x='left',
+        anchor_y='top',
+        parent=canvas.central_widget,
+    )
+
+    text_top_right = scene.visuals.Text(
+        text="Waiting...",
+        color='black',
+        font_size=font_size,
+        bold=False,
+        pos=(w, 0),
+        anchor_x='right',
+        anchor_y='bottom',
+        parent=canvas.central_widget,
+    )
+
+    return {
+        "text_top": text_top,
+        "text_bot": text_bot,
+        "text_top_right": text_top_right,
+    }
+
+
+def setup_visualization(config: SimulationConfig = DEFAULT_CONFIG) -> Dict[str, object]:
     """
     Set up the Vispy visualization environment including canvas, view, sphere, and markers.
 
     Returns:
         dict: Dictionary containing references to visualization components.
     """
-    canvas = scene.SceneCanvas(title='Mega-Constellation Simulation',size=(1200, 700),position=(0, 0),
-        keys='interactive', show=True, bgcolor=(1.0, 1.0, 1.0, 0))
+    canvas = scene.SceneCanvas(
+        title='Mega-Constellation Simulation',
+        size=(1200, 700),
+        position=(0, 0),
+        keys='interactive',
+        show=True,
+        bgcolor=(1.0, 1.0, 1.0, 0),
+    )
     view = canvas.central_widget.add_view()
     view.camera = scene.cameras.TurntableCamera(fov=45, azimuth=0, elevation=45, distance=2.5)
 
@@ -687,16 +806,7 @@ def setup_visualization() -> dict:
     axes.transform = STTransform(scale=(2, 2, 2))
 
     # Load texture image for the Earth sphere.
-    texture_path = "population_density_texture.png"
-    try:
-        texture_image = Image.open(texture_path)
-    except Exception as e:
-        logger.error("Error loading texture image: %s", e)
-        raise
-
-    texture = np.array(texture_image)
-    # Duplicate texture horizontally.
-    texture = np.hstack([texture, texture])
+    texture = _load_earth_texture(config.texture_path)
     # Create sphere mesh and compute texture coordinates.
     sphere = create_sphere(rows=20, cols=40, radius=1, method='latitude', offset=False)
     vertices = sphere.get_vertices(indexed='faces')
@@ -734,39 +844,7 @@ def setup_visualization() -> dict:
     # Lines for connected LISL.
     c_lisl = scene.visuals.Arrow()
     view.add(c_lisl)
-    w, h = canvas.size
-    # Create Text visual
-    
-    FONT_SIZE = 10
-    text_top = scene.visuals.Text(text="Waiting...",
-            color='black',
-            font_size=FONT_SIZE,
-            bold=False,
-            pos=(0, 0),
-            anchor_x='left',  # horizontal alignment
-            anchor_y='bottom',  # vertical alignment
-            parent=canvas.central_widget)
-    
-    text_bot = scene.visuals.Text(text="Waiting...",
-            color='black',
-            font_size=FONT_SIZE,
-            bold=False,
-            pos=(0, h),
-            anchor_x='left',  # horizontal alignment
-            anchor_y='top',  # vertical alignment
-            parent=canvas.central_widget)
-
-    text_top_right = scene.visuals.Text(text="Waiting...",
-            color='black',
-            font_size=FONT_SIZE,
-            bold=False,
-            pos=(w, 0),
-            anchor_x='right',  # horizontal alignment
-            anchor_y='bottom',  # vertical alignment
-            parent=canvas.central_widget)
-
-    # Position the text at the center
-    # text.transform = scene.STTransform(translate=(1, 1))
+    text_overlays = _create_text_overlays(canvas)
 
     return {
         "canvas": canvas,
@@ -776,27 +854,24 @@ def setup_visualization() -> dict:
         "arrow": satellite_arrow,
         "p_lisl": p_lisl,
         "c_lisl": c_lisl,
-        "text_top": text_top,
-        "text_bot": text_bot,
-        "text_top_right": text_top_right,
+        **text_overlays,
     }
 
 
 
+# ---------------------------
+# Simulation orchestration
+# ---------------------------
 class Simulation:
-    FOR_THETA: float = 15.0  # Angle in degrees for the satellite LT direction.
-    LISL_MAX_DISTANCE: float = 3000.0  # Maximum distance for LISL in km.
-    TIME_SCALE: float = 10.0
-    EARTH_RADIUS: float = 6371.0  # Earth's radius in km.
-    
-    PLOT_POTENTIAL_LISL: bool = False    
-    
+    """Main simulation controller for satellite state and visualization updates."""
+
+    # Standardized color palette for LT directions.
     FRONT_COLOR = np.array([0, 0, 0.85, 1])
     BACK_COLOR = np.array([0.05, 0.75, 0.05, 1])
     RIGHT_COLOR = np.array([1, 0, 0, 1])
     LEFT_COLOR = np.array([0.75, 0.75, 0, 1])
-    
-    def __init__(self, ts, sat_array, viz):
+
+    def __init__(self, ts, sat_array, viz: Dict[str, object], config: SimulationConfig = DEFAULT_CONFIG):
         """
         Initialize the simulation.
 
@@ -813,6 +888,7 @@ class Simulation:
         self.ts = ts
         self.sat_array = sat_array
         self.viz = viz
+        self.config = config
         
         self.simulation_start_time = self.ts.now()
         self.real_start_time = time.perf_counter()
@@ -842,7 +918,7 @@ class Simulation:
             Skyfield Time: The current simulation time.
         """
         elapsed_real = time.perf_counter() - self.real_start_time
-        elapsed_scaled = elapsed_real * self.TIME_SCALE
+        elapsed_scaled = elapsed_real * self.config.time_scale
         delta_days = elapsed_scaled / 86400  # Convert seconds to days.
         new_tt_jd = self.simulation_start_time.tt + delta_days
         return self.ts.tt(jd=new_tt_jd)
@@ -874,8 +950,8 @@ class Simulation:
             np.array([current_time.whole]),
             np.array([current_time.ut1_fraction])
         )
-        positions = np.array(pos_upd).reshape(-1, 3) / self.EARTH_RADIUS
-        velocities = np.array(vel_upd).reshape(-1, 3) / self.EARTH_RADIUS
+        positions = np.array(pos_upd).reshape(-1, 3) / self.config.earth_radius_km
+        velocities = np.array(vel_upd).reshape(-1, 3) / self.config.earth_radius_km
 
         R_icrs_to_teme = TEME.rotation_at(current_time)
         R_teme_to_icrs = R_icrs_to_teme.T
@@ -890,7 +966,8 @@ class Simulation:
         self.front, self.back, self.down, self.right, self.left = update_arrows(self.velocities, self.positions)
 
         a_from = np.tile(self.positions, (4, 1))
-        a_to = np.concatenate((self.front, self.back, self.right, self.left), axis=0) * 0.01 + a_from
+        a_to = np.concatenate((self.front, self.back, self.right, self.left), axis=0)
+        a_to = a_to * self.config.arrow_length_scale + a_from
         a_data = np.concatenate((a_from, a_to), axis=1).reshape(-1, 3)
 
         num_arrows = self.positions.shape[0] * 8
@@ -906,18 +983,18 @@ class Simulation:
         """Update satellite link visualizations using KDTree and matching."""
         logger.debug("Updating satellite links... %d", self.update_count)
         
-        # Compute the KDTree for efficient nearest neighbor search.
+        # 1) Build KDTree for efficient neighbor queries.
         tic = time.perf_counter()
         tree = cKDTree(self.positions)
-        distance_threshold = self.LISL_MAX_DISTANCE / self.EARTH_RADIUS
+        distance_threshold = self.config.lisl_max_distance_km / self.config.earth_radius_km
         edges = tree.query_pairs(r=distance_threshold, output_type='ndarray')
         toc = time.perf_counter()
         self.profiled_time['kdtree'] = toc - tic
         
         
-        # Compute the potential LISL edges.
+        # 2) Compute candidate edges and view constraints.
         # Precompute cosine threshold once.
-        cos_threshold = math.cos(math.radians(self.FOR_THETA))
+        cos_threshold = math.cos(math.radians(self.config.for_theta_deg))
 
         # Compute normalized direction for each edge.
         tic = time.perf_counter()
@@ -942,13 +1019,13 @@ class Simulation:
         self.profiled_time['p_lisl_LT_pair'] = toc - tic
         
         
-        # Filter view stacks for valid edges and compute pairwise minimum.
+        # 3) Filter view stacks for valid edges and compute pairwise minimum.
         tic = time.perf_counter()
         view_LT_pair_min_cos = compute_view_LT_pair_min_cos(filtered_view_from_stack, filtered_view_to_stack, p_lisl_LT_pair.reshape(-1))
         toc = time.perf_counter()
         self.profiled_time['view_LT_pair'] = toc - tic
 
-        # Expand edges and filter using the computed pair indicator.
+        # 4) Expand edges and filter using the computed pair indicator.
         tic = time.perf_counter()
         filtered_repeated, filtered_expanded = expand_and_filter_edges(filtered_edges, p_lisl_LT_pair)
         toc = time.perf_counter()
@@ -958,7 +1035,7 @@ class Simulation:
         # Set colors for all potential LISL edges.
         edges_color = np.array([self.FRONT_COLOR, self.BACK_COLOR, self.RIGHT_COLOR, self.LEFT_COLOR])
         # Draw the potential LISL edges.
-        if self.PLOT_POTENTIAL_LISL:
+        if self.config.plot_potential_lisl:
             # Build the color array using np.array for clarity.
             edges_color_data, p_lisl_data = optimize_edge_and_color_data(edges_color, filtered_expanded, filtered_repeated, self.positions)
             edges_color_data[:, 3] = 0.25
@@ -967,12 +1044,15 @@ class Simulation:
         toc = time.perf_counter()
         self.profiled_time['draw_p_lisl'] = toc - tic
     
-        # Compute the matching for the LISL edges.
-        # Compute the weighted edges for the matching.
+        # 5) Compute weighted edges and greedy matching.
         tic = time.perf_counter()
         weighted_edges = compute_weighted_edges(
-            self.velocities, self.positions, filtered_repeated, 
-            filtered_expanded, view_LT_pair_min_cos.reshape(-1), self.FOR_THETA
+            self.velocities,
+            self.positions,
+            filtered_repeated,
+            filtered_expanded,
+            view_LT_pair_min_cos.reshape(-1),
+            self.config.for_theta_deg,
         )
         toc = time.perf_counter()
         self.profiled_time['weight_edges'] = toc - tic
@@ -982,7 +1062,7 @@ class Simulation:
         toc = time.perf_counter()
         self.profiled_time['greedy_matching'] = toc - tic    
     
-        # Filter the edges based on the matching.
+        # 6) Filter edges based on the matching result.
         tic = time.perf_counter()
         m = len(matching)
         flat_array = np.fromiter((x for pair in ((min(e), max(e)) for e in matching)
@@ -992,22 +1072,20 @@ class Simulation:
         toc = time.perf_counter()
         self.profiled_time['filter_matching'] = toc - tic
         
-        # Draw the connected edges.
+        # 7) Draw the connected edges.
         tic = time.perf_counter()
         edges_color_data, c_lisl_data = optimize_edge_and_color_data(edges_color, connected_lts, connected_sat, self.positions, lift=True)
         self.viz['c_lisl'].set_data(pos=c_lisl_data, color=edges_color_data, width=2, connect='segments')
         toc = time.perf_counter()
         self.profiled_time['draw_matching'] = toc - tic
         
-        text = ""
-        text += f"#n_sats: {self.positions.shape[0]}\n"
-        text += f"#n_q_es: {edges.shape[0]}\n"
-        text += f"#n_p_sp: {filtered_edges.shape[0]}\n"
-        text += f"#n_p_lp: {filtered_expanded.shape[0]}\n"
-        text += f"#n_c_lp: {connected_lts.shape[0]}\n"
-        text += f"FOR_THETA: +/-{self.FOR_THETA:.0f}°\n"
-        text += f"MAX_DIST: {self.LISL_MAX_DISTANCE:.0f} km\n"
-        self.viz['text_top'].text = text
+        # Update the top-left overlay with link statistics.
+        self.viz['text_top'].text = self._build_link_summary_text(
+            edges,
+            filtered_edges,
+            filtered_expanded,
+            connected_lts,
+        )
 
         
     def update(self, event):
@@ -1020,43 +1098,33 @@ class Simulation:
         logger.info(f"CPU Usage: {cpu_usage}%, Memory Usage: {mem_usage:.2f} MB")
 
         try:
+            # Update Earth rotation for the current simulation time.
             tic = time.perf_counter()
             self._update_earth_rotation()
             toc = time.perf_counter()
             self.profiled_time['earth_rotation'] = toc - tic
             
+            # Update satellite state vectors (position and velocity).
             tic = time.perf_counter()
             self._update_satellite_positions()
             toc = time.perf_counter()
             self.profiled_time['satellite_positions'] = toc - tic
             
+            # Update LT direction arrows for each satellite.
             tic = time.perf_counter()
             self._update_satellite_arrows()
             toc = time.perf_counter()
             self.profiled_time['satellite_arrows'] = toc - tic
             
+            # Update LISL candidate edges and matching visualization.
             tic = time.perf_counter()
             self._update_links()
             toc = time.perf_counter()
             self.profiled_time['update_links'] = toc - tic
             
             
-            text = ""
-            text += f"AVG: {self.average_update_time:.4f} s\n"
-            text += f"UPD: {self.update_count}\n"
-            text += f"TOT: {time.perf_counter() - self.real_start_time:.2f} s\n"
-            text += f"FPS: {1./self.average_update_time:.2f}\n"
-            text += f"TSc: {self.TIME_SCALE:.2f}\n"
-            text += f"SWT: {self.accumulated_update_time*self.TIME_SCALE:.2f} s\n"
-            text += f"DAT: {self.get_simulation_time().utc_strftime('%Y-%m-%d %H:%M:%S')}\n"
-            text += f"CPU: {cpu_usage}%\n"
-            text += f"MEM: {mem_usage:.2f} MB\n"
-            self.viz['text_bot'].text = text
-            
-            text = ""
-            for key, value in self.profiled_time.items():
-                text += f"{key}: {value:.4f} s\n"
-            self.viz['text_top_right'].text = text
+            self.viz['text_bot'].text = self._build_status_text(cpu_usage, mem_usage)
+            self.viz['text_top_right'].text = self._build_profile_text()
         except Exception as e:
             logger.error("Unexpected error during update: %s", e)
 
@@ -1065,6 +1133,45 @@ class Simulation:
         self.update_count += 1
         self.accumulated_update_time += elapsed
         self.average_update_time = 0.9 * self.average_update_time + 0.1 * elapsed
+
+    def _build_link_summary_text(
+        self,
+        edges: np.ndarray,
+        filtered_edges: np.ndarray,
+        filtered_expanded: np.ndarray,
+        connected_lts: np.ndarray,
+    ) -> str:
+        """Format link statistics shown in the top-left overlay."""
+        text = ""
+        text += f"#n_sats: {self.positions.shape[0]}\n"
+        text += f"#n_q_es: {edges.shape[0]}\n"
+        text += f"#n_p_sp: {filtered_edges.shape[0]}\n"
+        text += f"#n_p_lp: {filtered_expanded.shape[0]}\n"
+        text += f"#n_c_lp: {connected_lts.shape[0]}\n"
+        text += f"FOR_THETA: +/-{self.config.for_theta_deg:.0f}°\n"
+        text += f"MAX_DIST: {self.config.lisl_max_distance_km:.0f} km\n"
+        return text
+
+    def _build_status_text(self, cpu_usage: float, mem_usage: float) -> str:
+        """Format runtime performance and time scaling stats."""
+        text = ""
+        text += f"AVG: {self.average_update_time:.4f} s\n"
+        text += f"UPD: {self.update_count}\n"
+        text += f"TOT: {time.perf_counter() - self.real_start_time:.2f} s\n"
+        text += f"FPS: {1./self.average_update_time:.2f}\n"
+        text += f"TSc: {self.config.time_scale:.2f}\n"
+        text += f"SWT: {self.accumulated_update_time*self.config.time_scale:.2f} s\n"
+        text += f"DAT: {self.get_simulation_time().utc_strftime('%Y-%m-%d %H:%M:%S')}\n"
+        text += f"CPU: {cpu_usage}%\n"
+        text += f"MEM: {mem_usage:.2f} MB\n"
+        return text
+
+    def _build_profile_text(self) -> str:
+        """Format profiling breakdown for the top-right overlay."""
+        text = ""
+        for key, value in self.profiled_time.items():
+            text += f"{key}: {value:.4f} s\n"
+        return text
 
     def update_dummy(self, event):
         """
@@ -1085,10 +1192,11 @@ def main():
     ts, valid_satellites, sat_array = load_starlink_data(satellite_url, reload=True)
 
     # Set up visualization.
-    viz = setup_visualization()
+    config = DEFAULT_CONFIG
+    viz = setup_visualization(config)
 
     # Create simulation instance.
-    simulation = Simulation(ts, sat_array, viz)
+    simulation = Simulation(ts, sat_array, viz, config=config)
 
     # Set up a timer to update the simulation at roughly 60 FPS.
     timer1 = app.Timer(interval=1 / 60.0, connect=simulation.update, start=True)
