@@ -55,7 +55,7 @@ For this simulation, we configure each LCT with a **3,000 km transmission range*
 
 ## Research Papers 📖
 
-This code is built on research exploring real-time connectivity and routing in LEO constellations:
+This code is built for research exploring real-time connectivity and routing in LEO constellations:
 
 1) [Duality-Guided Graph Learning for Real-Time Joint Connectivity and Routing in LEO Mega-Constellations](https://arxiv.org/abs/2601.21921)
 2) [Joint Laser Inter-Satellite Link Matching and Traffic Flow Routing in LEO Mega-Constellations via Lagrangian Duality](https://arxiv.org/abs/2601.21914)
@@ -250,23 +250,7 @@ A: Absolutely. The data-oriented design makes it easy to add features (new LCT c
 
 ## Citation & Contributing 🙌
 
-If you use this tool or the research described here, please cite the papers:
-
-```bibtex
-@article{gu2026duality,
-   title={Duality-Guided Graph Learning for Real-Time Joint Connectivity and Routing in LEO Mega-Constellations},
-   author={Gu, Zhouyou and Choi, Jinho and Quek, Tony Q. S. and Park, Jihong},
-   journal={arXiv preprint arXiv:2601.21921},
-   year={2026}
-}
-
-@article{gu2026joint,
-   title={Joint Laser Inter-Satellite Link Matching and Traffic Flow Routing in LEO Mega-Constellations via Lagrangian Duality},
-   author={Gu, Zhouyou and Park, Jihong and Choi, Jinho},
-   journal={arXiv preprint arXiv:2601.21914},
-   year={2026}
-}
-```
+If you use this tool or the research described here, please cite the papers above or acknowledge this repository and author in your work.
 
 **Have ideas for improvements?** Open an issue or submit a pull request. We welcome contributions from students and researchers!
 
