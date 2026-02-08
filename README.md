@@ -78,7 +78,7 @@ This code is built for research exploring real-time connectivity and routing in 
 }
 ```
 
-**Author:** Zhouyou Gu, Research Fellow at [Singapore University of Technology and Design (SUTD)](https://sutd.edu.sg), supervised by Prof. Jihong Park.
+**Author:** Zhouyou Gu, Research Fellow at Singapore University of Technology and Design (SUTD), supervised by Prof. Jihong Park.
 
 ## How It Works: Data-Oriented Design 🏗️
 
