@@ -15,6 +15,7 @@ import cProfile
 import io
 import logging
 import math
+import os
 import pstats
 import time
 from contextlib import contextmanager
@@ -32,7 +33,9 @@ from skyfield.api import load
 from skyfield.sgp4lib import TEME
 from sgp4.api import SatrecArray
 from vispy import app, gloo, scene
+import vispy.io as vispy_io
 from vispy.geometry import MeshData, create_sphere
+from vispy.gloo.util import _screenshot
 from vispy.visuals.filters import TextureFilter
 from vispy.visuals.transforms import MatrixTransform, STTransform
 
@@ -797,7 +800,7 @@ def setup_visualization(config: DigitalTwinConfig = DEFAULT_CONFIG) -> Dict[str,
         position=(0, 0),
         keys='interactive',
         show=True,
-        bgcolor=(1.0, 1.0, 1.0, 0),
+        bgcolor=(1.0, 1.0, 1.0, 1.0),
     )
     view = canvas.central_widget.add_view()
     view.camera = scene.cameras.TurntableCamera(fov=45, azimuth=0, elevation=45, distance=2.5)
@@ -920,7 +923,11 @@ class DigitalTwin:
         self.right = None
         self.left = None
         
-        self.profiled_time = {}       
+        self.profiled_time = {}
+        self.screenshot_count = 0
+        
+        # Connect double-click event handler
+        self.viz['canvas'].events.mouse_double_click.connect(self.handle_double_click)
 
         self._update_earth_rotation()
 
@@ -1151,6 +1158,35 @@ class DigitalTwin:
         self.accumulated_update_time += elapsed
         self.average_update_time = 0.9 * self.average_update_time + 0.1 * elapsed
 
+    def handle_double_click(self, event):
+        """
+        Handle double-click events to save a screenshot of the current visualization.
+        Screenshots are saved to the /images directory with a timestamp counter.
+        """
+        try:
+            # Ensure images directory exists
+            images_dir = os.path.join(os.path.dirname(__file__), 'images')
+            os.makedirs(images_dir, exist_ok=True)
+            
+            # Capture screenshot
+            self.viz['canvas'].update()
+            self.viz['canvas'].show()
+            img = _screenshot(
+                viewport=(0, 0, self.viz['canvas'].physical_size[0], self.viz['canvas'].physical_size[1]),
+                alpha=True
+            )
+            
+            # Save image with counter
+            timestamp = self.get_simulation_time().utc_strftime('%Y%m%d_%H%M%S')
+            filename = f"screenshot_{timestamp}_{self.screenshot_count:05d}.png"
+            filepath = os.path.join(images_dir, filename)
+            vispy_io.write_png(filepath, img)
+            
+            self.screenshot_count += 1
+            logger.info(f"Screenshot saved to {filepath}")
+        except Exception as e:
+            logger.error(f"Error saving screenshot: {e}")
+
     def _build_link_summary_text(
         self,
         edges: np.ndarray,
@@ -1193,7 +1229,8 @@ class DigitalTwin:
 
     def _build_author_text(self) -> str:
         """Format the window title with digital twin stats."""
-        author = f"Auth.: Z. Gu, Supr.: J. Park, Aff.: SUTD\n"
+        author = f"Mega-Constellation Digital Twin\n" 
+        author += f"Auth.: Z. Gu, Supr.: J. Park, Aff.: SUTD\n"
         return author
 
     def update_dummy(self, event):
