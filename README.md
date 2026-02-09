@@ -1,5 +1,9 @@
 # 🛰️ Mega-Constellation Digital Twin: A 3D Starlink LISL Visualizer
 
+![Mega-Constellation Overview](images/example/canvas.png)
+
+*The entire Starlink constellation in one frame. Black dots are satellites; colored lines show active laser links between satellites.*
+
 **Ever wondered how thousands of satellites communicate with each other in space?** This project brings mega-constellations to life with a real-time 3D visualization and research-grade digital twin platform. Watch Starlink satellites orbit Earth, compute laser inter-satellite links (LISL), and explore the future of global connectivity!
 
 ## Why This Project Matters 🌌
@@ -33,11 +37,6 @@ In this demo, we use two-line element (TLE) data of Starlink satellites from [Ce
 
 For this simulation, we configure each LCT with a **3,000 km transmission range** and a **±15° field of regard** (these are configurable research parameters, not necessarily exact Starlink specifications—actual Starlink ISL specifications are proprietary). When two satellites are close enough and their LCTs "see" each other, a laser link forms. The algorithm efficiently matches these links to maintain constellation connectivity.
 
-### Overview: The Full Constellation
-
-![Mega-Constellation Overview](images/example/canvas.png)
-
-*The entire Starlink constellation in one frame. Black dots are satellites; colored lines show active laser links between satellites.*
 
 ### Zoomed View: Laser Terminal Configuration
 
