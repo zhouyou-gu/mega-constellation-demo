@@ -163,10 +163,13 @@ You should see within 30–60 seconds:
 - **Double-click** – Save a high-res screenshot to `/images/` (useful for your research!)
   - Filename format: `screenshot_YYYYMMDD_HHMMSS_NNNNN.png`
   - The `/images` folder is created automatically
+- **Left-click (hold)** – Record a GIF while holding the button; release to save
+   - Saved under `/images/gifs/`
+   - Max duration is `gif_max_frames / gif_fps`
 
 ## Configuration 🎛️
 
-All parameters are in [simulation.py](simulation.py) under `DigitalTwinConfig`:
+Simulation parameters are in [simulation.py](simulation.py) under `DigitalTwinConfig`:
 
 ```python
 @dataclass(frozen=True)
@@ -178,6 +181,17 @@ class DigitalTwinConfig:
     plot_potential_lisl: bool = False        # Show all candidate links (slower)
     texture_path: str = "population_density_texture.png"
     arrow_length_scale: float = 0.01         # Size of directional arrows
+```
+
+Capture parameters are separate under `CaptureConfig`:
+
+```python
+@dataclass(frozen=True)
+class CaptureConfig:
+   screenshot_dir: str = "images"
+   gif_fps: int = 15
+   gif_max_frames: int = 300
+   gif_output_dir: str = "images/gifs"
 ```
 
 **Want to experiment?** Try these modifications:

@@ -77,7 +77,18 @@ class DigitalTwinConfig:
     arrow_length_scale: float = 0.01
 
 
+@dataclass(frozen=True)
+class CaptureConfig:
+    """Configuration for screenshots and GIF recording."""
+
+    screenshot_dir: str = "images"
+    gif_fps: int = 15
+    gif_max_frames: int = 300
+    gif_output_dir: str = "images/gifs"
+
+
 DEFAULT_CONFIG = DigitalTwinConfig()
+DEFAULT_CAPTURE_CONFIG = CaptureConfig()
 
 
 # ---------------------------
@@ -886,7 +897,14 @@ class DigitalTwin:
     RIGHT_COLOR = np.array([1, 0, 0, 1])
     LEFT_COLOR = np.array([0.75, 0.75, 0, 1])
 
-    def __init__(self, ts, sat_array, viz: Dict[str, object], config: DigitalTwinConfig = DEFAULT_CONFIG):
+    def __init__(
+        self,
+        ts,
+        sat_array,
+        viz: Dict[str, object],
+        config: DigitalTwinConfig = DEFAULT_CONFIG,
+        capture_config: CaptureConfig = DEFAULT_CAPTURE_CONFIG,
+    ):
         """
         Initialize the digital twin.
 
@@ -904,6 +922,7 @@ class DigitalTwin:
         self.sat_array = sat_array
         self.viz = viz
         self.config = config
+        self.capture_config = capture_config
         
         self.digital_twin_start_time = self.ts.now()
         self.real_start_time = time.perf_counter()
@@ -925,9 +944,20 @@ class DigitalTwin:
         
         self.profiled_time = {}
         self.screenshot_count = 0
+        self.gif_count = 0
+        self.gif_frames = []
+        self.gif_recording = False
+        self.gif_start_time = None
+        self.gif_timer = app.Timer(
+            interval=1.0 / self.capture_config.gif_fps,
+            connect=self._record_gif_frame,
+            start=False,
+        )
         
         # Connect double-click event handler
         self.viz['canvas'].events.mouse_double_click.connect(self.handle_double_click)
+        self.viz['canvas'].events.mouse_press.connect(self.handle_mouse_press)
+        self.viz['canvas'].events.mouse_release.connect(self.handle_mouse_release)
 
         self._update_earth_rotation()
 
@@ -1164,28 +1194,108 @@ class DigitalTwin:
         Screenshots are saved to the /images directory with a timestamp counter.
         """
         try:
-            # Ensure images directory exists
-            images_dir = os.path.join(os.path.dirname(__file__), 'images')
-            os.makedirs(images_dir, exist_ok=True)
-            
-            # Capture screenshot
-            self.viz['canvas'].update()
-            self.viz['canvas'].show()
-            img = _screenshot(
-                viewport=(0, 0, self.viz['canvas'].physical_size[0], self.viz['canvas'].physical_size[1]),
-                alpha=True
-            )
-            
-            # Save image with counter
             timestamp = self.get_simulation_time().utc_strftime('%Y%m%d_%H%M%S')
-            filename = f"screenshot_{timestamp}_{self.screenshot_count:05d}.png"
-            filepath = os.path.join(images_dir, filename)
-            vispy_io.write_png(filepath, img)
-            
+            image = self._capture_canvas_image()
+            filepath = self._save_png_screenshot(image, timestamp)
             self.screenshot_count += 1
             logger.info(f"Screenshot saved to {filepath}")
         except Exception as e:
             logger.error(f"Error saving screenshot: {e}")
+
+    def handle_mouse_press(self, event):
+        """
+        Start GIF recording when the left mouse button is pressed and held.
+        """
+        if event.button != 1:
+            return
+        if self.gif_recording:
+            return
+        self.gif_frames = []
+        self.gif_recording = True
+        self.gif_start_time = self.get_simulation_time()
+        self.gif_timer.start()
+
+    def handle_mouse_release(self, event):
+        """
+        Stop GIF recording and save when the left mouse button is released.
+        """
+        if event.button != 1:
+            return
+        if not self.gif_recording:
+            return
+        self.gif_recording = False
+        self.gif_timer.stop()
+        self._save_gif()
+
+    def _record_gif_frame(self, event):
+        """Capture a single frame for GIF recording."""
+        if not self.gif_recording:
+            return
+        if len(self.gif_frames) >= self.capture_config.gif_max_frames:
+            self.gif_recording = False
+            self.gif_timer.stop()
+            self._save_gif()
+            return
+
+        frame = Image.fromarray(self._capture_canvas_image())
+        self.gif_frames.append(frame)
+
+    # ---------------------------
+    # Screenshot and GIF utilities
+    # ---------------------------
+    def _capture_canvas_image(self) -> np.ndarray:
+        """Capture the current canvas image as a NumPy array."""
+        self.viz['canvas'].update()
+        self.viz['canvas'].show()
+        return _screenshot(
+            viewport=(0, 0, self.viz['canvas'].physical_size[0], self.viz['canvas'].physical_size[1]),
+            alpha=True,
+        )
+
+    def _ensure_dir(self, *parts: str) -> str:
+        """Ensure a directory exists under the project root and return its path."""
+        path = os.path.join(os.path.dirname(__file__), *parts)
+        os.makedirs(path, exist_ok=True)
+        return path
+
+    def _save_png_screenshot(self, image: np.ndarray, timestamp: str) -> str:
+        """Save a PNG screenshot and return the output path."""
+        images_dir = self._ensure_dir(self.capture_config.screenshot_dir)
+        filename = f"screenshot_{timestamp}_{self.screenshot_count:05d}.png"
+        filepath = os.path.join(images_dir, filename)
+        vispy_io.write_png(filepath, image)
+        return filepath
+
+    def _save_gif(self):
+        """Save the recorded frames as a GIF."""
+        if not self.gif_frames:
+            return
+
+        output_dir = self._ensure_dir(self.capture_config.gif_output_dir)
+
+        if self.gif_start_time is None:
+            timestamp = time.strftime('%Y%m%d_%H%M%S')
+        else:
+            timestamp = self.gif_start_time.utc_strftime('%Y%m%d_%H%M%S')
+
+        filename = f"recording_{timestamp}_{self.gif_count:05d}.gif"
+        filepath = os.path.join(output_dir, filename)
+
+        duration_ms = int(1000 / max(1, self.capture_config.gif_fps))
+        first = self.gif_frames[0].convert('P', palette=Image.ADAPTIVE)
+        rest = [frame.convert('P', palette=Image.ADAPTIVE) for frame in self.gif_frames[1:]]
+        first.save(
+            filepath,
+            save_all=True,
+            append_images=rest,
+            duration=duration_ms,
+            loop=0,
+            optimize=False,
+        )
+
+        self.gif_frames = []
+        self.gif_count += 1
+        logger.info(f"GIF saved to {filepath}")
 
     def _build_link_summary_text(
         self,
@@ -1253,10 +1363,11 @@ def main():
 
     # Set up visualization.
     config = DEFAULT_CONFIG
+    capture_config = DEFAULT_CAPTURE_CONFIG
     viz = setup_visualization(config)
 
     # Create digital twin instance.
-    digital_twin = DigitalTwin(ts, sat_array, viz, config=config)
+    digital_twin = DigitalTwin(ts, sat_array, viz, config=config, capture_config=capture_config)
 
     # Set up a timer to update the digital twin at roughly 60 FPS.
     timer1 = app.Timer(interval=1 / 60.0, connect=digital_twin.update, start=True)
