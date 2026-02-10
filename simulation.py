@@ -85,6 +85,8 @@ class CaptureConfig:
     gif_fps: int = 15
     gif_max_frames: int = 300
     gif_output_dir: str = "images/gifs"
+    gif_scale: float = 0.5
+    gif_colors: int = 128
 
 
 DEFAULT_CONFIG = DigitalTwinConfig()
@@ -1282,15 +1284,27 @@ class DigitalTwin:
         filepath = os.path.join(output_dir, filename)
 
         duration_ms = int(1000 / max(1, self.capture_config.gif_fps))
-        first = self.gif_frames[0].convert('P', palette=Image.ADAPTIVE)
-        rest = [frame.convert('P', palette=Image.ADAPTIVE) for frame in self.gif_frames[1:]]
+        scale = self.capture_config.gif_scale
+        if scale <= 0:
+            scale = 1.0
+
+        if scale != 1.0:
+            w, h = self.gif_frames[0].size
+            new_size = (max(1, int(w * scale)), max(1, int(h * scale)))
+            frames = [frame.resize(new_size, resample=Image.LANCZOS) for frame in self.gif_frames]
+        else:
+            frames = self.gif_frames
+
+        colors = max(2, min(256, int(self.capture_config.gif_colors)))
+        first = frames[0].convert('P', palette=Image.ADAPTIVE, colors=colors)
+        rest = [frame.convert('P', palette=Image.ADAPTIVE, colors=colors) for frame in frames[1:]]
         first.save(
             filepath,
             save_all=True,
             append_images=rest,
             duration=duration_ms,
             loop=0,
-            optimize=False,
+            optimize=True,
         )
 
         self.gif_frames = []
