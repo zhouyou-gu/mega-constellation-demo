@@ -85,7 +85,7 @@ class CaptureConfig:
     gif_fps: int = 15
     gif_max_frames: int = 300
     gif_output_dir: str = "images/gifs"
-    gif_scale: float = 0.5
+    gif_scale: float = 0.3
     gif_colors: int = 128
 
 
