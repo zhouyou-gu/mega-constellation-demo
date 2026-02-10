@@ -2,7 +2,7 @@
 ## A 3D Starlink LISL Visualizer
 <!-- # Mega-Constellation Digital Twin: A 3D Starlink LISL Visualizer -->
 *The entire Starlink constellation in one frame. Black dots are satellites; colored lines show active laser links between satellites.*
-![Mega-Constellation Overview](images/example/canvas.png)
+![Mega-Constellation Overview](images/gif/gif_example.gif)
 
 **Ever wondered how thousands of satellites communicate with each other in space?** This project brings mega-constellations to life with a real-time 3D visualization and research-grade digital twin platform. Watch Starlink satellites orbit Earth, compute laser inter-satellite links (LISL), and explore the future of global connectivity!
 
