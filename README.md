@@ -262,7 +262,7 @@ A: Absolutely. The data-oriented design makes it easy to add features (new LCT c
 
 ## Tested Platforms 🖥️
 
-- ✅ **macOS** – MacBook Pro (M4, 2024) @ FPS 15–25 for full Starlink constellation
+- ✅ **macOS** – MacBook Pro (M4, 2024) @ FPS 10–15 for full Starlink constellation
 
 ## Citation & Contributing 🙌
 
